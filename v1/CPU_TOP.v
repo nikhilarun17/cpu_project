@@ -25,19 +25,53 @@ module cpu_top (
         .mem_data_in(mem_data_in)
     );
 
+    //ITOA Part
+
+    reg         itoa_start;
+    reg  [15:0] itoa_value;
+    wire [7:0]  itoa_digit;
+    wire        itoa_valid;
+    wire        itoa_busy;
+    wire        itoa_done;
+
+    itoa itoa_inst (
+        .clk(clk),
+        .start(itoa_start),
+        .value(itoa_value),
+        .out_digit(itoa_digit),
+        .valid_digit(itoa_valid),
+        .busy(itoa_busy),
+        .done(itoa_done)
+    );
+
     reg [7:0] buffer [0:31];    
     reg [4:0] write_ptr = 0;    
     reg [4:0] read_ptr  = 0;
 
     // using 255 as bait and then shifting the storing of the data into the buffer
     wire uart_write = mem_write_enable && (mem_addr == 8'd255);
-
+    reg uart_write_prev = 0; // kept for handling cycles during itoa
     always @(posedge clk) begin
+        itoa_start <= 1'b0;
+        uart_write_prev <= uart_write;
+
         if (reset) begin
             write_ptr <= 0;
-        end else if (uart_write) begin
-            buffer[write_ptr] <= mem_data_in[7:0];
-            write_ptr <= write_ptr + 1; 
+        end else begin 
+            if (uart_write && !uart_write_prev) begin
+                if (mem_data_in[15] == 1'b1) begin
+                    itoa_value <= mem_data_in;
+                    itoa_start <= 1'b1;
+                end
+            end else if (uart_write) begin
+                buffer[write_ptr] <= mem_data_in[7:0];
+                write_ptr <= write_ptr + 1; 
+            end
+        end
+        
+        if (itoa_valid) begin
+            buffer[write_ptr] <= itoa_digit;
+            write_ptr <= write_ptr+1;
         end
     end
 

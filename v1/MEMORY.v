@@ -12,9 +12,9 @@ module dummy_memory (
 
     reg [15:0] mem [0:255];  
     // dummy_memory.v (you write this ONCE, never touch again)
-    initial begin
-        `include "program_init.v"
-    end
+    // initial begin
+    //     `include "program_init.v"
+    // end
 
     always @(posedge clk) begin
         if (we)

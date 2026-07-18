@@ -12,7 +12,8 @@ module dummy_decoder(
     output reg use_imm,
     output reg is_halt,
     output reg is_jump,
-    output reg is_jz
+    output reg is_jz,
+    output reg is_int
 );
 
     assign opcode = instruction[15:12];
@@ -31,6 +32,7 @@ module dummy_decoder(
         is_halt = 0;
         is_jump = 0;
         is_jz = 0;
+        is_int = 0;
 
         case (opcode)
             4'b0000: reg_we = 1; // ADD
@@ -53,6 +55,12 @@ module dummy_decoder(
             4'b1100: begin // LI
                 reg_we = 1;
                 use_imm = 1;
+                is_int = 0;
+            end
+            4'b1101: begin //LINT
+                reg_we = 1;
+                use_imm = 1;
+                is_int = 1;
             end
             4'b1111: is_halt = 1; // HALT   
             default: ;

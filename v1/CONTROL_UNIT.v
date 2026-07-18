@@ -19,7 +19,7 @@ reg [15:0] instr;  // Current instruction
 // Wires
 wire [3:0] opcode, rd, ra, rb;
 wire [7:0] immediate;
-wire reg_we, mem_we, mem_re, use_imm, is_halt, is_jump, is_jz;
+wire reg_we, mem_we, mem_re, use_imm, is_halt, is_jump, is_jz, is_int;
 wire [15:0] ra_out, rb_out, alu_result, mem_data_out; // to hold data after reading from registers and memory
 wire alu_check; // ALU result check for zero
 
@@ -42,7 +42,8 @@ dummy_decoder decoder (
     .use_imm(use_imm),
     .is_halt(is_halt),
     .is_jump(is_jump),
-    .is_jz(is_jz)
+    .is_jz(is_jz),
+    .is_int(is_int)
 );      
 
 dummy_reg registers (
@@ -122,7 +123,7 @@ always @(posedge clk) begin
                     // executing alu based on control signals 
                     if (reg_we) begin
                         // use_imm (LI) and normal ALU ops both handled here
-                        reg_write_data <= use_imm ? {8'b0, immediate} : alu_result;
+                        reg_write_data <= use_imm ? {is_int,7'b0, immediate} : alu_result;
                         reg_write_enable <= 1;
                     end
                     pc <= pc + 1; // Increment program counter for next instruction
