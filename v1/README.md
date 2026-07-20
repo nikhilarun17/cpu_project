@@ -1,68 +1,143 @@
-# CPU Project - V1
+# Mini CPU on FPGA — V1
 
-This is an hobby project of mine to try implementing a mini cpu on an fpga (Sipeed Tang Nano 20k) using Verilog and python (for compiler and assembler).
+A hobby project implementing a small CPU on an FPGA (**Sipeed Tang Nano 20K**) in **Verilog**, with a **Python** toolchain for the assembler. It runs programs that print integers and strings to a laptop terminal over UART, and it doubles as a live calculator: echo an arithmetic expression into the serial port and the result comes straight back.
 
-## V1 functionality:
-- Can program printing any integer or string and can print it on a laptop terminal using UART Protocol
-- Can read arithmetic calculations (simple 2 number multiplication with results capped at 32767) sent on the port and output results immediately (intentional design) on the same port using UART.
-- Can do both simulataneosly implementing a priority instruction format giving priority to whatever is sent from the terminal.
-- Programming is done on a custom very readable language which is converted to assembly which is later converted to binary.
+---
 
-## Structure:
+## Contents
 
-### Modules Used:
-- [ALU](ALU.v) :- Used to refer to arithmetic logics whihc instructions act based on.
-- [Control Unit](CONTROL_UNIT.v) :- Main block where instructions are processed and acted upon.
-- [Register](REG.v) :- A temporary scratch space where work is done before it is wiped out for the next usage.
-- [Decoder](DECODER.v) :- An module which is used to decode instructions and toggle writing and reading functions in memory and register so that the ALU and Control Unit can act upon it accordingly.
-- [UART-TX](UART_TX.v) and [UART-RX](UART_RX.v) :- Used for communication between the terminal and the fpga.
-- [Memory](MEMORY.v) :- Used for storage of instructions as of now and used as bait for storing things to print.
+- [What it does](#what-it-does)
+- [Architecture](#architecture)
+  - [Hardware modules](#hardware-modules)
+  - [Helper modules](#helper-modules)
+  - [Software toolchain](#software-toolchain)
+- [Instruction set](#instruction-set)
+- [How it works](#how-it-works)
+- [Getting started](#getting-started)
+  - [1. Build the bitstream](#1-build-the-bitstream)
+  - [2. Write and assemble a program](#2-write-and-assemble-a-program)
+  - [3. Flash the board](#3-flash-the-board)
+  - [4. Talk to it over serial](#4-talk-to-it-over-serial)
+- [Roadmap](#roadmap)
+- [Gallery](#gallery)
 
-### Additional Helpers Used:
-- [Arithmetic Calculator](bodmos.v) :- A helper module which writes imm_pc instructions and injects them into the control unit (halting the current program) and running the immediate program first.
-- [ITOA](itoa.v) :- Used to handle the integer to ASCII conversion for processing, storing and printing (Uses Double Dabble algorithm).
-- [Button debounce](button_debounce.v) :- Another helper to handle the button debounce of the reset button.
+---
 
-All modules are integrated and called in [CPU_TOP](CPU_TOP.v) (A unit which acts as the top layer and contains the control unit along with the rx and tx communications between different devices).
+## What it does
 
-### Python Helpers Used:
-- [Assembler](assembler.py) :- Takes in Assembly code from a txt file and converts it into binary instructions correctly which is directly stored in a temporary file called program_init.v which is directly accessed by Memory.
+- **Prints integers and strings** to a laptop terminal over the UART protocol.
+- **Acts as a live calculator** — send a simple two-number arithmetic expression to the serial port and the result is returned immediately (by design) on the same port. Results are capped at 32767.
+- **Does both at once** via a priority-instruction scheme: anything sent from the terminal preempts the currently running program, runs first, then control returns.
+- **Uses a readable custom assembly language**, converted to binary by the Python assembler before being loaded into memory.
 
-## All features implemented:
-- 16 unit register with 16 bits per unit. 256 Unit memory with 16 bits every unit.
-- 16 bit wide instructions containing the format [OP_code][RA_Address][RB_Address][RD_Address] 
-- UART_TX with 8 bit transfer at a time (in one call) accessing a 32 unit tx storage buffer.
-- UART_RX with syncing which stores in another rx buffer for further use with the help of [arithmetic calculator](bodmos.v)
-- Tagged storage to store and differentiate integers and ASCII characters.
-- ALU with 14 calculation possibilities and Decoder with 16 values (load,jmp,jz,add,subtract,etc) to decode from the memory instructions.
-- Button debounce to sort out any issues with multiple button registers in one press
-- ITOA for managing integer to ASCII when printing, storing and processing.
-- Control unit which can work with priority halting with imm_instructions are loaded.
+---
 
-## To be improved:
-- Adding improved TX which can process larger than 8 bits and send them together as one.
-- Better values for Register units, memory units, unit size and instruction list (Just expansion to add more space to work with)
-- Better handling of integers and differentiating when storing.
-- A custom compiler which compiles into assembly for easier usage.
-- Better RX handling and more efficient usage of LUT's.
-- Adding more features like image processing and faster communication than UART if possible.
-- Add concept of negative numbers
+## Architecture
 
+Everything is integrated and instantiated in **[CPU_TOP.v](CPU_TOP.v)**, the top layer that wraps the control unit together with the UART RX/TX paths and the terminal-facing logic.
 
-## Images:
+### Hardware modules
 
-![alt text](images/image.png)
+| Module | Role |
+| --- | --- |
+| [ALU.v](ALU.v) | Arithmetic and logic operations that instructions act on. |
+| [CONTROL_UNIT.v](CONTROL_UNIT.v) | Core block that fetches, decodes, and executes instructions. |
+| [DECODER.v](DECODER.v) | Decodes instructions and toggles the read/write signals for memory and registers so the ALU and control unit act correctly. |
+| [REG.v](REG.v) | Register file — temporary scratch space, wiped between uses. |
+| [MEMORY.v](MEMORY.v) | Stores instructions, and doubles as the "bait" address used to stage values for printing. |
+| [UART_TX.v](UART_TX.v) / [UART_RX.v](UART_RX.v) | Serial communication between the terminal and the FPGA. |
 
-![alt text](images/image-1.png)
+### Helper modules
 
-## How to use:
-- Install the software for your fpga board (gowin ide for tang-nano 20k).
-- Upload all the verilog files into the software and synthesize it and route it after assigning the correct rx and tx pins for UART and clock.
-- Write your custom Assembly code in the file [input.txt](input.txt) and run the python file [assembler.py](assembler.py)
-- Upload to the fpga and open the port in the terminal (use minicom or picocom or anything else and set the baud rate accorindingly (default is 115200, can be changed in code.)) and echo any arithmetic into the the port to get the result immediately.
+| Module | Role |
+| --- | --- |
+| [bodmos.v](bodmos.v) | Arithmetic front-end: parses expressions from RX, writes an immediate (`imm_pc`) instruction sequence, and injects it into the control unit — halting the current program to run the immediate one first. |
+| [itoa.v](itoa.v) | Integer-to-ASCII conversion for processing, storing, and printing (Double Dabble algorithm). |
+| [button_debounce.v](button_debounce.v) | Debounces the physical reset button. |
 
-```
-# Found this to be the best and most user-friendly way
+### Software toolchain
+
+| Tool | Role |
+| --- | --- |
+| [assembler.py](assembler.py) | Reads assembly from a text file and emits binary instructions into `program_init.v`, which `MEMORY.v` includes directly. |
+
+---
+
+## Instruction set
+
+- **Register file:** 16 registers × 16 bits.
+- **Memory:** 256 words × 16 bits.
+- **Instruction width:** 16 bits, laid out as `[OP_CODE][RD][RA][RB]`.
+- **ALU:** 14 operations (add, subtract, and the rest).
+- **Decoder:** 16 decoded operations including `LOAD`, `JMP`, `JZ`, `ADD`, `SUB`, and more.
+- **Tagged storage** distinguishes integers from ASCII characters when values are stored.
+
+---
+
+## How it works
+
+A normal program runs from memory as you'd expect: fetch → decode → execute. The interesting part is the **priority injection** path. When you send an expression over serial, `bodmos.v` parses it, builds a short instruction sequence for the operation, and injects it into the control unit. The control unit pauses the running program, executes the injected sequence, prints the result via `itoa.v` and `UART_TX.v`, then resumes — so calculator results appear immediately regardless of what the main program was doing.
+
+---
+
+## Getting started
+
+### 1. Build the bitstream
+
+1. Install the toolchain for your board — **Gowin IDE** for the Tang Nano 20K.
+2. Add all the Verilog files to a Gowin project.
+3. Assign pins for the UART **RX**, UART **TX**, and the **clock** in your constraints file.
+4. **Synthesize** and **Place & Route**.
+
+### 2. Write and assemble a program
+
+1. Write your program in the custom assembly language in **[input.txt](input.txt)**.
+2. Run the assembler:
+   ```bash
+   python assembler.py
+   ```
+   This generates `program_init.v`, which `MEMORY.v` loads automatically.
+
+### 3. Flash the board
+
+Program the generated bitstream onto the FPGA from the Gowin programmer.
+
+### 4. Talk to it over serial
+
+Open the serial port with your terminal of choice (minicom, picocom, or plain `cat`), matching the baud rate (default **115200**, configurable in the source).
+
+The most user-friendly setup:
+```bash
+# configure the port (raw mode, no local echo)
 stty -F /dev/ttyUSB1 115200 raw -echo
+
+# read whatever the board sends back
 cat /dev/ttyUSB1
 ```
+
+Then, from a second terminal, echo an expression into the port to get the result immediately:
+```bash
+echo '40+40' > /dev/ttyUSB1
+```
+
+> Adjust `/dev/ttyUSB1` to match your board's device path.
+
+---
+
+## Roadmap
+
+- **Wider TX** — send values larger than 8 bits together in a single transfer.
+- **Bigger machine** — more registers, more memory, larger word size, and a longer instruction list for more room to work.
+- **Better integer handling** — cleaner differentiation when storing.
+- **A custom compiler** that compiles down to assembly for easier programming.
+- **Improved RX handling** and more efficient LUT usage.
+- **Negative number support.**
+- **Stretch goals** — image processing and a faster link than UART.
+
+---
+
+## Gallery
+
+![Project image](images/image.png)
+
+![Project image](images/image-1.png)
