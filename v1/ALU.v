@@ -17,6 +17,8 @@ always @(*) begin
         4'b0110: result = (a < b) ? 16'd1 : 16'd0; 
         4'b0111: result = (a == b) ? 16'd1 : 16'd0;
         4'b1011: result = a; //jz check
+        4'b1110: result = a * b;                      
+        4'b1111: result = (b == 0) ? 16'd0 : a / b;    // DIV (div-by-zero -> 0)
 
         default: result = 0;
     endcase

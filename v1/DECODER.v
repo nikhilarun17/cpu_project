@@ -62,9 +62,15 @@ module dummy_decoder(
                 use_imm = 1;
                 is_int = 1;
             end
-            4'b1111: is_halt = 1; // HALT   
+            4'b1110: reg_we = 1; // MUL
+            4'b1111: begin
+                // opcode 1111 is split: rd == 15 -> HALT (canonical 16'hFF00)
+                //                       rd != 15 -> DIV rd, ra, rb
+                // (so DIV can't target r15 -- fine, r15 is jump scratch)
+                if (rd == 4'b1111) is_halt = 1;
+                else               reg_we  = 1;
+            end
             default: ;
         endcase
     end
 endmodule
-

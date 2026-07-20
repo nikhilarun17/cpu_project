@@ -1,30 +1,3 @@
-// bodmos.v
-// Listens to UART_RX bytes, parses "<num> <op> <num>\r" style input,
-// then generates a short instruction sequence that is injected into the
-// control unit (which pauses whatever it was doing, runs it, and resumes).
-//
-// Token buffer (rx_buff) format, 16 bits per token:
-//   bit15 = 1 : number token, value in bits [14:0]  (the "integer flag")
-//   bit15 = 0 : operator/other token, raw ASCII in bits [7:0]
-//
-// Recognised operators: + - * /   (no precedence yet -- first number,
-// first operator, second number win; everything else is ignored)
-//
-// Injected program (16 instructions, uses r7-r10 and r13 only;
-// r14 = 255 preamble and r15 = jump scratch are deliberately untouched):
-//   0: LI   r7, A
-//   1: LI   r8, B
-//   2: OP   r9, r7, r8
-//   3: LINT r10, 0          ; r10 = 0x8000 (print flag)
-//   4: OR   r9, r9, r10     ; tag result so the 255-snoop fires itoa
-//   5: LI   r13, 255
-//   6: STORE r9,  r13       ; -> itoa -> digits to TX
-//   7: LI   r7, 13          ; '\r'
-//   8: STORE r7,  r13       ; raw char path
-//   9: LI   r7, 10          ; '\n'
-//  10: STORE r7,  r13
-//  11..15: LI r7/r8/r9/r10/r13, 0   ; wipe the registers we used
-
 module bodmos(
     input clk,
     input reset,
@@ -44,12 +17,14 @@ module bodmos(
 );
 
     localparam INJ_LEN = 16;
+    
+    wire inj_pc_valid = (inj_pc != 5'd16);
 
-    // ---------- token buffer ----------
+    //token buffer 
     reg [15:0] rx_buff [0:7];
     reg [2:0]  wr_ptr;
 
-    // ---------- number accumulator ----------
+    //  number accumulator for calculating multiple digit numbers using arithmetic before storing
     reg [14:0] int_hold;
     reg        has_digits;
 
@@ -58,26 +33,30 @@ module bodmos(
     reg [7:0]  pend_char;
     reg        pend_valid;
 
-    // ---------- extracted expression ----------
+    //  extracted expression 
     reg [14:0] opA, opB;
     reg        got_a, got_b, got_op;
     reg [3:0]  op_bits;
     reg [2:0]  scan_idx;
 
-    // ---------- injected program ----------
+    //  injected instruction construction
     reg [15:0] prog [0:INJ_LEN-1];
-    assign inj_instr = prog[inj_pc[3:0]];
+    assign inj_instr = inj_pc_valid ? prog[inj_pc[3:0]] : 16'b1100_0000_00000000;
 
     localparam COLLECT = 3'd0;
     localparam EOL_CR  = 3'd1;   // echo '\r'
     localparam EOL_LF  = 3'd2;   // echo '\n'
-    localparam SCAN    = 3'd3;   // walk rx_buff, pull out A, op, B
-    localparam BUILD   = 3'd4;   // write the 16 instructions
-    localparam RUN     = 3'd5;   // hold inj_active until CU consumed all
-    localparam CLEAN   = 3'd6;   // reset buffer + operand state
+    localparam SCAN    = 3'd3;   // walk rx_buff and pull out stuff like A, op, B
+    localparam BUILD   = 3'd4;   // write the 16 instructions (including freeing registers)
+    localparam RUN     = 3'd5;   // holds inj_active until control unit finished all it needs to do 
+    localparam CLEAN   = 3'd6;   // reset buffer and operand
 
     reg [2:0] state;
-    reg prev_cr;   // swallow the LF of a CRLF pair
+    reg prev_cr;   // eradicating/destroying/washing the LF of a CRLF pair
+
+    localparam IDLE_LIMIT = 27'd27000000;   
+    reg [26:0] idle_count = 0;
+    wire line_in_progress = has_digits || (wr_ptr != 0) || pend_valid;
 
     wire is_digit = (rx_data >= "0") && (rx_data <= "9");
     wire is_eol   = (rx_data == 8'd13) || (rx_data == 8'd10);
@@ -114,6 +93,21 @@ module bodmos(
             case (state)
 
                 COLLECT: begin
+                    // waiting period
+                    if (rx_done)
+                        idle_count <= 0;
+                    else if (line_in_progress) begin
+                        if (idle_count == IDLE_LIMIT) begin
+                            idle_count <= 0;
+                            wr_ptr     <= 0;
+                            int_hold   <= 0;
+                            has_digits <= 0;
+                            pend_valid <= 0;
+                        end else
+                            idle_count <= idle_count + 1;
+                    end else
+                        idle_count <= 0;
+
                     if (pend_valid) begin
                         // push the operator that was waiting behind a number flush
                         rx_buff[wr_ptr] <= {8'b0, pend_char};
@@ -129,9 +123,8 @@ module bodmos(
                         end else if (is_eol) begin
                             prev_cr <= (rx_data == 8'd13);
                             if (rx_data == 8'd10 && prev_cr) begin
-                                // LF right after CR: already handled, ignore
                             end else begin
-                            // Enter: flush trailing number, do NOT push the CR/LF
+                            // prevents flushing of enter characters
                             if (has_digits) begin
                                 rx_buff[wr_ptr] <= {1'b1, int_hold};
                                 wr_ptr <= wr_ptr + 1;
@@ -152,7 +145,7 @@ module bodmos(
                             echo_data  <= rx_data;
                             echo_valid <= 1'b1;
                         end else begin
-                            // operator (or junk -- SCAN only takes the first + - * /)
+                            // operator (takes in only first operator)
                             if (has_digits) begin
                                 rx_buff[wr_ptr] <= {1'b1, int_hold};
                                 wr_ptr <= wr_ptr + 1;
@@ -202,8 +195,7 @@ module bodmos(
                 end
 
                 BUILD: begin
-                    // opB defaults to 0 and op_bits to ADD, so a lone
-                    // number just echoes itself back (A + 0)
+                    // opB defaults to 0 and op_bits to ADD. A number sent by itself is sent back basically
                     prog[0]  <= {4'b1100, 4'd7,  opA[7:0]};        // LI   r7, A
                     prog[1]  <= {4'b1100, 4'd8,  opB[7:0]};        // LI   r8, B
                     prog[2]  <= {op_bits, 4'd9,  4'd7, 4'd8};      // OP   r9, r7, r8
@@ -235,6 +227,7 @@ module bodmos(
                     wr_ptr <= 0;
                     int_hold <= 0;
                     has_digits <= 0;
+                    pend_valid <= 0;   // stale pending operator must not leak into the next line
                     got_a <= 0; got_b <= 0; got_op <= 0;
                     op_bits <= 4'b0000;
                     opA <= 0; opB <= 0;

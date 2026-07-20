@@ -23,13 +23,6 @@ module itoa(
     reg [3:0] d;
     integer j;
 
-
-    // helper: extract BCD digit i (0=most significant .. 4=least significant)
-    // digit 0 lives in bits [34:31], digit 1 in [30:27], ... digit 4 in [18:15]
-    function [3:0] get_digit(input [34:0] ts, input [2:0] idx);
-        get_digit = ts[34 - idx*4 -: 4];
-    endfunction
-
     always @(posedge clk) begin
         valid_digit <= 1'b0; 
         done        <= 1'b0;

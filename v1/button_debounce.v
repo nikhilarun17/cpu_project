@@ -3,19 +3,25 @@ module button_debounce(
     input button_in,
     output reg reset = 1'b1
 );
-    reg [15:0] debounce_counter;
-    reg button_stable = 1'b1; 
+    reg [19:0] debounce_counter = 0;
+    reg button_stable = 1'b1;
+    reg sync0 = 1'b1, sync1 = 1'b1;   // two-stage synchronizer
 
     always @(posedge clk) begin
-        if (button_in != button_stable) begin
+        // synchronize the raw button signal first (avoids metastability)
+        sync0 <= button_in;
+        sync1 <= sync0;
+
+        if (sync1 != button_stable) begin
             debounce_counter <= debounce_counter + 1;
-            if (debounce_counter == 16'hFFFF) begin
-                button_stable <= button_in;
-                reset <= ~button_in; 
+            if (debounce_counter == 20'hFFFFF) begin
+                button_stable <= sync1;
+                reset <= ~sync1;
+                debounce_counter <= 0;   // reset counter immediately after accepting
             end
         end else begin
             debounce_counter <= 0;
         end
-    end 
+    end
 
 endmodule

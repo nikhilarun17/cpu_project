@@ -1,8 +1,8 @@
 def parse_value(tok):
     if len(tok) == 3 and tok[0] == "'" and tok[2] == "'":
-        return ord(tok[1])   # character literal, e.g. 'H' -> 72
+        return ord(tok[1])   # for characters
     else:
-        return int(tok)       # plain number, e.g. 72 -> 72
+        return int(tok)       # for plain numbers
 
 with open("input.txt", "r") as f:
     lines = f.read().splitlines()  # splits on \n and drops it automatically
@@ -35,7 +35,7 @@ for i in range(len(lines)):
     else:
         address += 1
 address = 0
-assembly_names = {"ADD": "0000", "SUB": "0001", "AND": "0010", "OR": "0011", "XOR": "0100", "NOT": "0101", "LT": "0110", "EQ": "0111"}
+assembly_names = {"ADD": "0000", "SUB": "0001", "AND": "0010", "OR": "0011", "XOR": "0100", "NOT": "0101", "LT": "0110", "EQ": "0111", "MUL": "1110", "DIV": "1111"}
 binary_lines = []
 binary_lines.append("mem[{}] = 1100".format(address) + "1110" + "11111111")  # LI r14, 255
 address += 1
@@ -70,6 +70,9 @@ for i in range(len(lines)):
         address += 1
     elif line.startswith("STORE"):
         binary_lines.append("mem[{}] = 1001".format(address) + "0000" + format(int(line.split()[1].lstrip('r')), '04b') + "1110")
+        address += 1
+    elif line.startswith("HALT"):
+        binary_lines.append("mem[{}] = 1111111100000000".format(address))
         address += 1
 
 with open("program_init.v", "w") as f:
